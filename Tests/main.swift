@@ -129,3 +129,25 @@ for original: Bool? in [nil,false,true] {
 }
 var deniedCalls:[Bool] = []
 precondition(instantWrite(enhanced:true,setEnhanced:{ deniedCalls.append($0); return false },perform:{ true }) && deniedCalls == [false])
+
+// Ink is transient and cannot change while clicks pass through the overlay.
+let ink = InkSession(), a = CGPoint(x:12,y:20), b = CGPoint(x:45,y:60), c = CGPoint(x:60,y:80)
+ink.begin(at:a, arrow:false); precondition(ink.draft == nil)
+ink.edit(); ink.begin(at:a, arrow:false); ink.extend(to:b); ink.finish(at:c)
+ink.begin(at:c, arrow:true); ink.extend(to:a); ink.finish(at:b)
+precondition(ink.strokes.count == 2 && ink.strokes[1].arrow && ink.strokes[1].path.elementCount == 2)
+ink.undo(); precondition(ink.strokes.count == 1)
+ink.pin(); precondition(ink.mode == .pinned); ink.begin(at:c, arrow:false); ink.undo(); precondition(ink.draft == nil && ink.strokes.count == 1)
+ink.edit(); ink.begin(at:a, arrow:true); ink.finish(at:a); precondition(ink.strokes.last?.start == ink.strokes.last?.end)
+ink.clear(); precondition(ink.mode == .off && ink.strokes.isEmpty && ink.draft == nil)
+ink.edit(); ink.pin(); precondition(ink.mode == .off)
+print("红笔、直箭头、撤销、穿透、继续标注与退出测试通过")
+
+let smoothed = InkStroke(.zero,arrow:false)
+for p in [CGPoint(x:8,y:2),CGPoint(x:16,y:7),CGPoint(x:24,y:14)] { smoothed.append(p) }
+precondition((0..<smoothed.path.elementCount).contains { smoothed.path.element(at:$0) == .cubicCurveTo })
+precondition(smoothed.paintedBounds.contains(smoothed.end))
+
+let nib = FountainPenCursor.pen
+precondition(nib.image.size == NSSize(width:32,height:32) && nib.hotSpot == NSPoint(x:3,y:29))
+precondition(!nib.image.isTemplate && nib.image.isValid)

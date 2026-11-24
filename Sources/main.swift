@@ -5,6 +5,7 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     let menu = NSMenu()
     let preview = NSPanel(contentRect: .zero, styleMask: [.borderless,.nonactivatingPanel], backing: .buffered, defer: true)
+    private let annotation = AnnotationController()
     private var permission = PermissionChanges()
     private var permissionTimer: Timer?
     private var restoreSlot = RestoreSlot<MinimizedWindow>()
@@ -38,6 +39,7 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.perform(action, pid:NSWorkspace.shared.frontmostApplication?.processIdentifier)
             }
             monitor = NSEvent.addGlobalMonitorForEvents(matching:[.leftMouseDown,.leftMouseDragged,.leftMouseUp]) { [weak self] event in
+                guard self?.annotation.ink.mode != .editing else { return }
                 if event.type == .leftMouseDown { self?.commandGeneration += 1 }
                 self?.dragging.handle(event)
             }
@@ -73,8 +75,20 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
             }
         } else { add("开启辅助功能…", #selector(authorize)) }
+        menu.addItem(.separator())
+        switch annotation.ink.mode {
+        case .off: add("屏幕标注", #selector(editInk)).toolTip = "拖动画线，Shift 拖动画箭头；回车保留，Esc 清除。"
+        case .editing: add("保留标注", #selector(pinInk)); add("清除标注", #selector(clearInk))
+        case .pinned: add("继续标注", #selector(editInk)); add("清除标注", #selector(clearInk))
+        }
         menu.addItem(.separator()); add("退出", #selector(quit))
     }
+    @objc private func editInk() {
+        guard let s = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main else { return }
+        commandGeneration += 1; dragging.cancel(); annotation.edit(on:s)
+    }
+    @objc private func pinInk() { annotation.pin() }
+    @objc private func clearInk() { annotation.clear() }
     @objc func quit() { NSApp.terminate(nil) }
     @objc func authorize() {
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt":true] as CFDictionary)
@@ -85,6 +99,7 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
         perform(shortcut.action, pid: previousPID)
     }
     func perform(_ action: WindowAction, pid: pid_t?) {
+        guard annotation.ink.mode != .editing else { return }
         commandGeneration += 1
         dragging.cancel()
         guard AXIsProcessTrusted() else { NSSound.beep(); return }
@@ -138,7 +153,7 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         apply(0)
     }
-    @objc private func cancelDrag() { commandGeneration += 1; dragging.cancel() }
+    @objc private func cancelDrag() { annotation.clear(); commandGeneration += 1; dragging.cancel() }
 }
 let app = NSApplication.shared
 let delegate = Goodwin(); app.delegate = delegate; app.setActivationPolicy(.accessory); app.run()

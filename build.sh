@@ -2,7 +2,7 @@
 set -eu
 cd "$(dirname "$0")"
 mkdir -p build
-swiftc Sources/Layout.swift Sources/Shortcuts.swift Sources/DragController.swift Sources/WindowControl.swift Sources/RestoreSlot.swift Tests/main.swift -o build/check-layout
+swiftc Sources/FountainPenCursor.swift Sources/Annotation.swift Sources/Layout.swift Sources/Shortcuts.swift Sources/DragController.swift Sources/WindowControl.swift Sources/RestoreSlot.swift Tests/main.swift -o build/check-layout
 build/check-layout
 app=build/Goodwin.app
 mkdir -p "$app/Contents/MacOS"
