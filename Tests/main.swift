@@ -151,3 +151,9 @@ precondition(smoothed.paintedBounds.contains(smoothed.end))
 let nib = FountainPenCursor.pen
 precondition(nib.image.size == NSSize(width:32,height:32) && nib.hotSpot == NSPoint(x:3,y:29))
 precondition(!nib.image.isTemplate && nib.image.isValid)
+
+precondition(GlobalShortcuts.inkCode == UInt32(kVK_Return))
+precondition(!Shortcut.allCases.contains { $0.keyCode == GlobalShortcuts.inkCode })
+var inkKey = KeyLatch()
+precondition(inkKey.handle(pressed:true) && !inkKey.handle(pressed:true))
+precondition(!inkKey.handle(pressed:false) && inkKey.handle(pressed:true))

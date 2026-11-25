@@ -40,27 +40,52 @@ struct PermissionChanges {
     }
 }
 
+struct KeyLatch {
+    private var held = false
+    mutating func handle(pressed: Bool) -> Bool {
+        defer { held = pressed }; return pressed && !held
+    }
+}
+
 final class GlobalShortcuts {
+    static let inkCode = UInt32(kVK_Return)
+    private static let inkID: UInt32 = 5
+    private var inkRef: EventHotKeyRef?, inkKey = KeyLatch()
+    private let toggleInk: () -> Void
+    var inkRegistered: Bool { inkRef != nil }
     private static let signature: OSType = 0x4757494E // GWIN
     private var handler: EventHandlerRef?
     private var registrations: [Shortcut: EventHotKeyRef] = [:]
     private let perform: (WindowAction) -> Void
     func registered(_ key: Shortcut) -> Bool { registrations[key] != nil }
 
-    init(perform: @escaping (WindowAction) -> Void) {
+    init(toggleInk: @escaping () -> Void, perform: @escaping (WindowAction) -> Void) {
+        self.toggleInk = toggleInk
         self.perform = perform
         let target = GetApplicationEventTarget()
-        var pressed = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        var events = [kEventHotKeyPressed,kEventHotKeyReleased].map { EventTypeSpec(eventClass:OSType(kEventClassKeyboard),eventKind:UInt32($0)) }
         let status = InstallEventHandler(target, { _, event, context in
             guard let event, let context else { return OSStatus(eventNotHandledErr) }
             var id = EventHotKeyID()
             guard GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &id) == noErr,
-                  id.signature == GlobalShortcuts.signature, let key = Shortcut(rawValue: id.id) else { return OSStatus(eventNotHandledErr) }
-            Unmanaged<GlobalShortcuts>.fromOpaque(context).takeUnretainedValue().perform(key.action)
+                  id.signature == GlobalShortcuts.signature else { return OSStatus(eventNotHandledErr) }
+            let owner = Unmanaged<GlobalShortcuts>.fromOpaque(context).takeUnretainedValue()
+            let pressed = GetEventKind(event) == UInt32(kEventHotKeyPressed)
+            if id.id == GlobalShortcuts.inkID {
+                if owner.inkKey.handle(pressed:pressed) { owner.toggleInk() }
+            } else if pressed, let key = Shortcut(rawValue:id.id) { owner.perform(key.action) }
             return noErr
-        }, 1, &pressed, Unmanaged.passUnretained(self).toOpaque(), &handler)
+        }, 2, &events, Unmanaged.passUnretained(self).toOpaque(), &handler)
         guard status == noErr else { return }
-        for key in Shortcut.allCases {
+        _ = RegisterEventHotKey(Self.inkCode, Shortcut.modifiers, EventHotKeyID(signature:Self.signature,id:Self.inkID),target,UInt32(kEventHotKeyExclusive),&inkRef)
+    }
+    func enableLayoutKeys(_ enabled:Bool) {
+        guard handler != nil else { return }
+        guard enabled else {
+            for ref in registrations.values { UnregisterEventHotKey(ref) }; registrations.removeAll(); return
+        }
+        let target = GetApplicationEventTarget()
+        for key in Shortcut.allCases where registrations[key] == nil {
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: Self.signature, id: key.rawValue)
             if RegisterEventHotKey(key.keyCode, Shortcut.modifiers, id, target, UInt32(kEventHotKeyExclusive), &ref) == noErr {
@@ -69,6 +94,7 @@ final class GlobalShortcuts {
         }
     }
     deinit {
+        if let inkRef { UnregisterEventHotKey(inkRef) }
         for ref in registrations.values { UnregisterEventHotKey(ref) }
         if let handler { RemoveEventHandler(handler) }
     }

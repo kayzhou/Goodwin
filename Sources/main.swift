@@ -28,16 +28,17 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
         preview.animationBehavior = .none
         preview.contentView = SnapOutline()
         NotificationCenter.default.addObserver(self, selector:#selector(cancelDrag), name:NSApplication.didChangeScreenParametersNotification, object:nil)
+        shortcuts = GlobalShortcuts(toggleInk:{ [weak self] in self?.toggleInk() }) { [weak self] action in
+            self?.perform(action,pid:NSWorkspace.shared.frontmostApplication?.processIdentifier)
+        }
         syncPermission()
         let timer = Timer(timeInterval:2, repeats:true) { [weak self] _ in self?.syncPermission() }
         timer.tolerance = 0.5; RunLoop.main.add(timer, forMode:.common); permissionTimer = timer
     }
     private func syncPermission() {
         guard let trusted = permission.update(AXIsProcessTrusted()) else { return }
+        shortcuts?.enableLayoutKeys(trusted)
         if trusted {
-            shortcuts = GlobalShortcuts { [weak self] action in
-                self?.perform(action, pid:NSWorkspace.shared.frontmostApplication?.processIdentifier)
-            }
             monitor = NSEvent.addGlobalMonitorForEvents(matching:[.leftMouseDown,.leftMouseDragged,.leftMouseUp]) { [weak self] event in
                 guard self?.annotation.ink.mode != .editing else { return }
                 if event.type == .leftMouseDown { self?.commandGeneration += 1 }
@@ -46,12 +47,11 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else {
             commandGeneration += 1
             restoreSlot.saved = nil
-            shortcuts = nil
             if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
             dragging.cancel()
         }
         let bound = Shortcut.allCases.filter { shortcuts?.registered($0) == true }.count
-        NSLog("Goodwin: Accessibility=%@, shortcuts=%d/%d", trusted ? "authorized" : "not authorized", bound, Shortcut.allCases.count)
+        NSLog("Goodwin: Accessibility=%@, shortcuts=%d/%d, annotation=%@", trusted ? "authorized" : "not authorized", bound, Shortcut.allCases.count, shortcuts?.inkRegistered == true ? "registered" : "unavailable")
     }
     @discardableResult func add(_ title:String, _ action:Selector, tag:Int = 0) -> NSMenuItem {
         let entry = menu.addItem(withTitle:title, action:action, keyEquivalent:""); entry.target = self; entry.tag = tag
@@ -76,18 +76,26 @@ final class Goodwin: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } else { add("开启辅助功能…", #selector(authorize)) }
         menu.addItem(.separator())
+        let inkTitle: String
         switch annotation.ink.mode {
-        case .off: add("屏幕标注", #selector(editInk)).toolTip = "拖动画线，Shift 拖动画箭头；回车保留，Esc 清除。"
-        case .editing: add("保留标注", #selector(pinInk)); add("清除标注", #selector(clearInk))
-        case .pinned: add("继续标注", #selector(editInk)); add("清除标注", #selector(clearInk))
+        case .off: inkTitle = "屏幕标注"
+        case .editing: inkTitle = "保留标注"
+        case .pinned: inkTitle = "继续标注"
         }
+        let available = shortcuts?.inkRegistered == true
+        let entry = add(inkTitle + (available ? "" : "（快捷键未注册）"), #selector(toggleInk))
+        if available { entry.keyEquivalent = "\r"; entry.keyEquivalentModifierMask = [.control,.option] }
+        entry.toolTip = "拖动画线，Shift 拖动画箭头；回车保留，Esc 清除。"
+        if annotation.ink.mode != .off { add("清除标注", #selector(clearInk)) }
         menu.addItem(.separator()); add("退出", #selector(quit))
     }
-    @objc private func editInk() {
+    @objc private func toggleInk() {
+        if annotation.ink.mode == .editing { annotation.pin() } else { editInk() }
+    }
+    private func editInk() {
         guard let s = NSScreen.screens.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? NSScreen.main else { return }
         commandGeneration += 1; dragging.cancel(); annotation.edit(on:s)
     }
-    @objc private func pinInk() { annotation.pin() }
     @objc private func clearInk() { annotation.clear() }
     @objc func quit() { NSApp.terminate(nil) }
     @objc func authorize() {
